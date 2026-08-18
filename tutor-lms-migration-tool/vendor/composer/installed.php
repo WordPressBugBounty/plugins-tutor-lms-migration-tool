@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'themeum/tutor-lms-migration-tool',
-        'pretty_version' => '2.4.1',
-        'version' => '2.4.1.0',
-        'reference' => 'a59d9b8265f7b7efe342f5412061abb20540b17e',
+        'pretty_version' => '2.5.0',
+        'version' => '2.5.0.0',
+        'reference' => 'b3c8ff3db462618adc57bb53f859881d538ff0c4',
         'type' => 'library',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -11,9 +11,9 @@
     ),
     'versions' => array(
         'themeum/tutor-lms-migration-tool' => array(
-            'pretty_version' => '2.4.1',
-            'version' => '2.4.1.0',
-            'reference' => 'a59d9b8265f7b7efe342f5412061abb20540b17e',
+            'pretty_version' => '2.5.0',
+            'version' => '2.5.0.0',
+            'reference' => 'b3c8ff3db462618adc57bb53f859881d538ff0c4',
             'type' => 'library',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

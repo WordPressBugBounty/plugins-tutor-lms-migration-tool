@@ -3,6 +3,32 @@ const { __ } = wp.i18n;
 jQuery(document).ready(function ($) {
     'use strict';
     const { __ } = wp.i18n;
+
+    /**
+     * Tutor nonce for AJAX calls that are not form-serialized.
+     * insert_tutor_migration_data / tlmt_reset_migrated_items_count both require it.
+     */
+    function getTutorMigrationNoncePayload() {
+        var nonceKey = (window._tutorobject && window._tutorobject.nonce_key) || '_tutor_nonce';
+        var nonce = (window._tutorobject && window._tutorobject._tutor_nonce) || '';
+        if (!nonce) {
+            nonce = $('form#tlmt-lp-migrate-to-tutor-lms input[name="_tutor_nonce"]').val()
+                || $('form#tutor_migration_export_form input[name="_tutor_nonce"]').val()
+                || $('#tutor-manual-migrate-form input[name="_tutor_nonce"]').val()
+                || $('input[name="_tutor_nonce"]').first().val()
+                || '';
+        }
+        var payload = {};
+        if (nonce) {
+            payload[nonceKey] = nonce;
+        }
+        return payload;
+    }
+
+    function postWithTutorNonce(data) {
+        return $.post(ajaxurl, $.extend({}, getTutorMigrationNoncePayload(), data));
+    }
+
     $(document).on("click", ".install-tutor-button", function (t) {
         t.preventDefault();
         var select = $(this);
@@ -46,15 +72,43 @@ jQuery(document).ready(function ($) {
     }
 
     var countProgress;
-    function migration_progress_bar(cmplete) {
+    function handleMigrationStepFailure(data, sectionSelector) {
+        clearTimeout(countReviewsProgress);
+        clearTimeout(checkProgress);
+        clearTimeout(countProgress);
+        clearTimeout(countOrderProgress);
+        clearTimeout(countSubscriptionProgress);
+        clearTimeout(countEnrollmentProgress);
+
+        if (sectionSelector) {
+            $(sectionSelector).find('.j-spinner').removeClass('tmtl_spin');
+        }
+
+        $('.migrate-now-btn').removeAttr('disabled').removeClass('tutor-updating-message');
+        $('.lp-error-modal').addClass('active');
+
+        if (data && data.data && data.data.message) {
+            console.error('Migration step failed:', data.data);
+        }
+    }
+
+	function migration_progress_bar(complete, percent) {
         var $progressBar = $('#sectionCourse').find('.tutor-progress');
+        if (typeof percent === 'number' && !isNaN(percent)) {
+            var clamped = Math.max(0, Math.min(100, Math.round(percent)));
+            $progressBar.show().attr('style', '--tutor-progress : ' + clamped + '% ').attr('data-percent', clamped);
+            if (complete || clamped >= 100) {
+                clearTimeout(countProgress);
+            }
+            return;
+        }
         var data_parcent = parseInt($progressBar.attr('data-percent'));
-        if (cmplete) {
+        if (complete) {
             $progressBar.attr('style', '--tutor-progress : 100% ').attr('data-percent', 100);
         } else {
             data_parcent++;
             $progressBar.show().attr('style', '--tutor-progress : ' + data_parcent + '% ').attr('data-percent', data_parcent);
-            countProgress = setTimeout(migration_progress_bar, 300, cmplete);
+            countProgress = setTimeout(migration_progress_bar, 300, complete);
         }
     }
     var migration_vendor = 'lp';
@@ -74,68 +128,340 @@ jQuery(document).ready(function ($) {
             migration_vendor = 'lif';
         }
 
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: $formData + '&migrate_type=courses',
-            beforeSend: function (XMLHttpRequest) {
-                migrateBtn.attr('disabled', 'disabled');
-                $('.tutor-progress').attr('style', '--tutor-progress : 0% ').hide().attr('data-percent', 0);
-                get_live_progress_course_migrating_info(final_types);
-                $('#sectionCourse').find('.j-spinner').addClass('tmtl_spin');
-                migration_progress_bar();
-            },
-            success: function (data) {
-                $('#sectionCourse').find('.j-spinner').addClass('tmtl_done');
-                migration_progress_bar(true);
-                migrate_orders($formData, final_types);
-            },
-            complete: function () {
-                clearTimeout(countReviewsProgress);
-                clearTimeout(checkProgress);
-                clearTimeout(countProgress);
-                $('#sectionCourse').find('.j-spinner').removeClass('tmtl_spin');
-                $.post(ajaxurl, { action: 'tlmt_reset_migrated_items_count' });
+        function finishCourseMigrationStep() {
+            clearTimeout(countReviewsProgress);
+            clearTimeout(checkProgress);
+            clearTimeout(countProgress);
+            $('#sectionCourse').find('.j-spinner').removeClass('tmtl_spin').addClass('tmtl_done');
+            migration_progress_bar(true, 100);
+            postWithTutorNonce({ action: 'tlmt_reset_migrated_items_count' });
+            migrate_enrollments($formData, final_types);
+        }
+
+        function migrate_courses_batch(isFirstBatch) {
+            var requestData = $formData + '&migrate_type=courses';
+            if (isFirstBatch && final_types === 'ld') {
+                requestData += '&ld_course_migration_start=1';
             }
-        });
+            if (isFirstBatch && final_types === 'lp') {
+                requestData += '&lp_course_migration_start=1';
+            }
+
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: requestData,
+                beforeSend: function () {
+                    if (isFirstBatch) {
+                        migrateBtn.attr('disabled', 'disabled');
+                        $('.tutor-progress').attr('style', '--tutor-progress : 0% ').hide().attr('data-percent', 0);
+                        get_live_progress_course_migrating_info(final_types);
+                        $('#sectionCourse').find('.j-spinner').addClass('tmtl_spin');
+                        if (final_types === 'ld' || final_types === 'lp') {
+                            migration_progress_bar(false, 0);
+                        } else {
+                            migration_progress_bar();
+                        }
+                    }
+                },
+                success: function (data) {
+                    if (!data || !data.success) {
+                        handleMigrationStepFailure(data, '#sectionCourse');
+                        return;
+                    }
+
+                    var payload = data.data || {};
+                    if ((final_types === 'ld' || final_types === 'lp') && payload.total > 0) {
+                        var percent = (Number(payload.migrated) / Number(payload.total)) * 100;
+                        migration_progress_bar(false, percent);
+                    }
+
+                    if (payload.has_more) {
+                        migrate_courses_batch(false);
+                        return;
+                    }
+
+                    finishCourseMigrationStep();
+                },
+                error: function (xhr) {
+                    handleMigrationStepFailure(xhr.responseJSON || {}, '#sectionCourse');
+                }
+            });
+        }
+
+        migrate_courses_batch(true);
     });
 
-    var countOrderProgress;
-    function order_migration_progress_bar(cmplete) {
-        var $progressBar = $('#sectionOrders').find('.tutor-progress');
+    var countEnrollmentProgress;
+    function enrollment_migration_progress_bar(complete, percent) {
+        var $progressBar = $('#sectionEnrollments').find('.tutor-progress');
+        if (!$progressBar.length) {
+            return;
+        }
+        if (typeof percent === 'number' && !isNaN(percent)) {
+            var clamped = Math.max(0, Math.min(100, Math.round(percent)));
+            $progressBar.show().attr('style', '--tutor-progress : ' + clamped + '% ').attr('data-percent', clamped);
+            if (complete || clamped >= 100) {
+                clearTimeout(countEnrollmentProgress);
+            }
+            return;
+        }
         var data_parcent = parseInt($progressBar.attr('data-percent'));
 
-        if (cmplete) {
+        if (complete) {
             $progressBar.attr('style', '--tutor-progress : 100% ').attr('data-percent', 100);
         } else {
             data_parcent++;
             $progressBar.show().attr('style', '--tutor-progress : ' + data_parcent + '% ').attr('data-percent', data_parcent);
-            countOrderProgress = setTimeout(order_migration_progress_bar, 300, cmplete);
+            countEnrollmentProgress = setTimeout(enrollment_migration_progress_bar, 300, complete);
+        }
+    }
+
+    function migrate_enrollments($formData, final_types) {
+        if (!$('#sectionEnrollments').length) {
+            migrate_orders($formData, final_types);
+            return;
+        }
+
+        function finishEnrollmentsMigrationStep() {
+            clearTimeout(countEnrollmentProgress);
+            clearTimeout(countReviewsProgress);
+            clearTimeout(checkProgress);
+            clearTimeout(countProgress);
+            $('#sectionEnrollments').find('.j-spinner').removeClass('tmtl_spin').addClass('tmtl_done');
+            enrollment_migration_progress_bar(true, 100);
+            postWithTutorNonce({ action: 'tlmt_reset_migrated_items_count' });
+            migrate_orders($formData, final_types);
+        }
+
+        function migrate_enrollments_batch(isFirstBatch) {
+            var requestData = $formData + '&migrate_type=enrollments';
+            if (isFirstBatch && final_types === 'ld') {
+                requestData += '&ld_enrollment_migration_start=1';
+            }
+            if (isFirstBatch && final_types === 'lp') {
+                requestData += '&lp_enrollment_migration_start=1';
+            }
+
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: requestData,
+                beforeSend: function () {
+                    if (isFirstBatch) {
+                        get_live_progress_course_migrating_info(final_types);
+                        $('#sectionEnrollments').find('.j-spinner').addClass('tmtl_spin');
+                        if (final_types === 'ld' || final_types === 'lp') {
+                            enrollment_migration_progress_bar(false, 0);
+                        } else {
+                            enrollment_migration_progress_bar();
+                        }
+                    }
+                },
+                success: function (data) {
+                    if (!data || !data.success) {
+                        handleMigrationStepFailure(data, '#sectionEnrollments');
+                        return;
+                    }
+
+                    var payload = data.data || {};
+                    if ((final_types === 'ld' || final_types === 'lp') && payload.total > 0) {
+                        var percent = (Number(payload.migrated) / Number(payload.total)) * 100;
+                        enrollment_migration_progress_bar(false, percent);
+                    }
+
+                    if (payload.has_more) {
+                        migrate_enrollments_batch(false);
+                        return;
+                    }
+
+                    finishEnrollmentsMigrationStep();
+                },
+                error: function (xhr) {
+                    handleMigrationStepFailure(xhr.responseJSON || {}, '#sectionEnrollments');
+                }
+            });
+        }
+
+        migrate_enrollments_batch(true);
+    }
+
+    var countOrderProgress;
+	function order_migration_progress_bar(complete, percent) {
+        var $progressBar = $('#sectionOrders').find('.tutor-progress');
+        if (typeof percent === 'number' && !isNaN(percent)) {
+            var clamped = Math.max(0, Math.min(100, Math.round(percent)));
+            $progressBar.show().attr('style', '--tutor-progress : ' + clamped + '% ').attr('data-percent', clamped);
+            if (complete || clamped >= 100) {
+                clearTimeout(countOrderProgress);
+            }
+            return;
+        }
+        var data_parcent = parseInt($progressBar.attr('data-percent'));
+
+        if (complete) {
+            $progressBar.attr('style', '--tutor-progress : 100% ').attr('data-percent', 100);
+        } else {
+            data_parcent++;
+            $progressBar.show().attr('style', '--tutor-progress : ' + data_parcent + '% ').attr('data-percent', data_parcent);
+            countOrderProgress = setTimeout(order_migration_progress_bar, 300, complete);
         }
     }
     function migrate_orders($formData, final_types) {
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: $formData + '&migrate_type=orders',
-            beforeSend: function (XMLHttpRequest) {
-                get_live_progress_course_migrating_info();
-                $('#sectionOrders').find('.j-spinner').addClass('tmtl_spin');
-                order_migration_progress_bar(final_types);
-            },
-            success: function (data) {
-                $('#sectionOrders').find('.j-spinner').addClass('tmtl_done');
-                order_migration_progress_bar(true);
-                migrate_reviews($formData);
-            },
-            complete: function () {
-                clearTimeout(countReviewsProgress);
-                clearTimeout(checkProgress);
-                clearTimeout(countProgress);
-                $('#sectionOrders').find('.j-spinner').removeClass('tmtl_spin');
-                $.post(ajaxurl, { action: 'tlmt_reset_migrated_items_count' });
+        function finishOrdersMigrationStep() {
+            clearTimeout(countOrderProgress);
+            clearTimeout(countReviewsProgress);
+            clearTimeout(checkProgress);
+            clearTimeout(countProgress);
+            $('#sectionOrders').find('.j-spinner').removeClass('tmtl_spin').addClass('tmtl_done');
+            order_migration_progress_bar(true, 100);
+            postWithTutorNonce({ action: 'tlmt_reset_migrated_items_count' });
+            migrate_subscriptions($formData, final_types);
+        }
+
+        function migrate_orders_batch(isFirstBatch) {
+            var requestData = $formData + '&migrate_type=orders';
+            if (isFirstBatch && final_types === 'ld') {
+                requestData += '&ld_order_migration_start=1';
             }
-        });
+            if (isFirstBatch && final_types === 'lp') {
+                requestData += '&lp_order_migration_start=1';
+            }
+
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: requestData,
+                beforeSend: function () {
+                    if (isFirstBatch) {
+                        get_live_progress_course_migrating_info(final_types);
+                        $('#sectionOrders').find('.j-spinner').addClass('tmtl_spin');
+                        if (final_types === 'ld' || final_types === 'lp') {
+                            order_migration_progress_bar(false, 0);
+                        } else {
+                            order_migration_progress_bar();
+                        }
+                    }
+                },
+                success: function (data) {
+                    if (!data || !data.success) {
+                        handleMigrationStepFailure(data, '#sectionOrders');
+                        return;
+                    }
+
+                    var payload = data.data || {};
+                    if ((final_types === 'ld' || final_types === 'lp') && payload.total > 0) {
+                        var percent = (Number(payload.migrated) / Number(payload.total)) * 100;
+                        order_migration_progress_bar(false, percent);
+                    }
+
+                    if (payload.has_more) {
+                        migrate_orders_batch(false);
+                        return;
+                    }
+
+                    finishOrdersMigrationStep();
+                },
+                error: function (xhr) {
+                    handleMigrationStepFailure(xhr.responseJSON || {}, '#sectionOrders');
+                }
+            });
+        }
+
+        migrate_orders_batch(true);
+    }
+
+    var countSubscriptionProgress;
+    function subscription_migration_progress_bar(complete, percent) {
+        var $progressBar = $('#sectionSubscriptions').find('.tutor-progress');
+        if (!$progressBar.length) {
+            return;
+        }
+        if (typeof percent === 'number' && !isNaN(percent)) {
+            var clamped = Math.max(0, Math.min(100, Math.round(percent)));
+            $progressBar.show().attr('style', '--tutor-progress : ' + clamped + '% ').attr('data-percent', clamped);
+            if (complete || clamped >= 100) {
+                clearTimeout(countSubscriptionProgress);
+            }
+            return;
+        }
+        var data_parcent = parseInt($progressBar.attr('data-percent'));
+
+        if (complete) {
+            $progressBar.attr('style', '--tutor-progress : 100% ').attr('data-percent', 100);
+        } else {
+            data_parcent++;
+            $progressBar.show().attr('style', '--tutor-progress : ' + data_parcent + '% ').attr('data-percent', data_parcent);
+            countSubscriptionProgress = setTimeout(subscription_migration_progress_bar, 300, complete);
+        }
+    }
+
+    function migrate_subscriptions($formData, final_types) {
+        if (!$('#sectionSubscriptions').length) {
+            migrate_reviews($formData, final_types);
+            return;
+        }
+
+        final_types = final_types || 'ld';
+
+        function finishSubscriptionsMigrationStep() {
+            clearTimeout(countSubscriptionProgress);
+            clearTimeout(countReviewsProgress);
+            clearTimeout(checkProgress);
+            clearTimeout(countProgress);
+            $('#sectionSubscriptions').find('.j-spinner').removeClass('tmtl_spin').addClass('tmtl_done');
+            subscription_migration_progress_bar(true, 100);
+            postWithTutorNonce({ action: 'tlmt_reset_migrated_items_count' });
+            migrate_reviews($formData, final_types);
+        }
+
+        function migrate_subscriptions_batch(isFirstBatch) {
+            var requestData = $formData + '&migrate_type=subscriptions';
+            if (isFirstBatch && final_types === 'ld') {
+                requestData += '&ld_subscription_migration_start=1';
+            }
+
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: requestData,
+                beforeSend: function () {
+                    if (isFirstBatch) {
+                        get_live_progress_course_migrating_info(final_types);
+                        $('#sectionSubscriptions').find('.j-spinner').addClass('tmtl_spin');
+                        if (final_types === 'ld') {
+                            subscription_migration_progress_bar(false, 0);
+                        } else {
+                            subscription_migration_progress_bar();
+                        }
+                    }
+                },
+                success: function (data) {
+                    if (!data || !data.success) {
+                        handleMigrationStepFailure(data, '#sectionSubscriptions');
+                        return;
+                    }
+
+                    var payload = data.data || {};
+                    if (final_types === 'ld' && payload.total > 0) {
+                        var percent = (Number(payload.migrated) / Number(payload.total)) * 100;
+                        subscription_migration_progress_bar(false, percent);
+                    }
+
+                    if (payload.has_more) {
+                        migrate_subscriptions_batch(false);
+                        return;
+                    }
+
+                    finishSubscriptionsMigrationStep();
+                },
+                error: function (xhr) {
+                    handleMigrationStepFailure(xhr.responseJSON || {}, '#sectionSubscriptions');
+                }
+            });
+        }
+
+        migrate_subscriptions_batch(true);
     }
 
 
@@ -143,64 +469,109 @@ jQuery(document).ready(function ($) {
      * Migrate And Progress Reviews
      */
     var countReviewsProgress;
-    function reviews_migration_progress_bar(cmplete) {
+    function reviews_migration_progress_bar(complete, percent) {
         var $progressBar = $('#sectionReviews').find('.tutor-progress');
+        if (typeof percent === 'number' && !isNaN(percent)) {
+            var clamped = Math.max(0, Math.min(100, Math.round(percent)));
+            $progressBar.show().attr('style', '--tutor-progress : ' + clamped + '% ').attr('data-percent', clamped);
+            if (complete || clamped >= 100) {
+                clearTimeout(countReviewsProgress);
+            }
+            return;
+        }
         var data_parcent = parseInt($progressBar.attr('data-percent'));
-        if (cmplete) {
+        if (complete) {
             $progressBar.attr('style', '--tutor-progress : 100% ').attr('data-percent', 100);
         } else {
             data_parcent++;
             $progressBar.show().attr('style', '--tutor-progress : ' + data_parcent + '% ').attr('data-percent', data_parcent);
-            countReviewsProgress = setTimeout(reviews_migration_progress_bar, 300, cmplete);
+            countReviewsProgress = setTimeout(reviews_migration_progress_bar, 300, complete);
         }
     }
 
-    function migrate_reviews($formData) {
-        $.ajax({
-            url: ajaxurl,
-            type: 'POST',
-            data: $formData + '&migrate_type=reviews',
-            beforeSend: function (XMLHttpRequest) {
-                get_live_progress_course_migrating_info();
-                $('#sectionReviews').find('.j-spinner').addClass('tmtl_spin');
-                reviews_migration_progress_bar();
-            },
-            success: function (data) {
-                $('#sectionReviews').find('.j-spinner').addClass('tmtl_done');
-                reviews_migration_progress_bar(true);
-                if (data.success) {
-                    clearTimeout(countReviewsProgress);
-                    clearTimeout(checkProgress);
-                    clearTimeout(countProgress);
-                    $.post(ajaxurl, {
-                        migration_type: 'Imported',
-                        migration_vendor: migration_vendor,
-                        action: 'insert_tutor_migration_data'
-                    });
-                }
+    function migrate_reviews($formData, final_types) {
+        final_types = final_types || migration_vendor || 'ld';
 
-                const res = data.data;
-                const { total_course_count = 0, failed = [] } = res || {};
+        function finishReviewsMigrationStep(data) {
+            clearTimeout(countReviewsProgress);
+            clearTimeout(checkProgress);
+            clearTimeout(countProgress);
+            $('#sectionReviews').find('.j-spinner').removeClass('tmtl_spin').addClass('tmtl_done');
+            reviews_migration_progress_bar(true, 100);
+            $('.migrate-now-btn').removeClass('tutor-updating-message');
+            postWithTutorNonce({ action: 'tlmt_reset_migrated_items_count' });
 
-                if (Number(total_course_count) > 0) {
-                    if (failed.length > 0) {
-                        $('.lp-success-modal').addClass('active');
-                    } else {
-                        $('.lp-success-modal').addClass('active');
-                    }
-                } else {
-                    $('.lp-error-modal').addClass('active');
-                }
-            },
-            complete: function () {
-                clearTimeout(countReviewsProgress);
-                clearTimeout(checkProgress);
-                clearTimeout(countProgress);
-                $('.migrate-now-btn').removeClass('tutor-updating-message');
-                $('#sectionReviews').find('.j-spinner').removeClass('tmtl_spin');
-                $.post(ajaxurl, { action: 'tlmt_reset_migrated_items_count' });
+            if (data && data.success) {
+                postWithTutorNonce({
+                    migration_type: 'Imported',
+                    migration_vendor: migration_vendor,
+                    action: 'insert_tutor_migration_data'
+                });
             }
-        });
+
+            const res = (data && data.data) || {};
+            const { total_course_count = 0, failed = [] } = res;
+            const fallbackCount = Number($('#total_items_migrate_counts').data('count')) || 0;
+            const migratedTotal = Number(total_course_count) || fallbackCount;
+
+            // LP/LIF responses may omit total_course_count; treat AJAX success as migration success.
+            if ( ( data && data.success ) && ( migratedTotal > 0 || ( Array.isArray( failed ) && failed.length === 0 ) ) ) {
+                $('.lp-success-modal').addClass('active');
+            } else {
+                $('.lp-error-modal').addClass('active');
+            }
+        }
+
+        function migrate_reviews_batch(isFirstBatch) {
+            var requestData = $formData + '&migrate_type=reviews';
+            if (isFirstBatch && final_types === 'ld') {
+                requestData += '&ld_review_migration_start=1';
+            }
+            if (isFirstBatch && final_types === 'lp') {
+                requestData += '&lp_review_migration_start=1';
+            }
+
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: requestData,
+                beforeSend: function () {
+                    if (isFirstBatch) {
+                        get_live_progress_course_migrating_info(final_types);
+                        $('#sectionReviews').find('.j-spinner').addClass('tmtl_spin');
+                        if (final_types === 'ld' || final_types === 'lp') {
+                            reviews_migration_progress_bar(false, 0);
+                        } else {
+                            reviews_migration_progress_bar();
+                        }
+                    }
+                },
+                success: function (data) {
+                    if (!data || !data.success) {
+                        handleMigrationStepFailure(data, '#sectionReviews');
+                        return;
+                    }
+
+                    var payload = data.data || {};
+                    if ((final_types === 'ld' || final_types === 'lp') && payload.total > 0) {
+                        var percent = (Number(payload.migrated) / Number(payload.total)) * 100;
+                        reviews_migration_progress_bar(false, percent);
+                    }
+
+                    if (payload.has_more) {
+                        migrate_reviews_batch(false);
+                        return;
+                    }
+
+                    finishReviewsMigrationStep(data);
+                },
+                error: function (xhr) {
+                    handleMigrationStepFailure(xhr.responseJSON || {}, '#sectionReviews');
+                }
+            });
+        }
+
+        migrate_reviews_batch(true);
     }
 
     var migrateBtn = $(".migrate-now-btn");
@@ -214,6 +585,7 @@ jQuery(document).ready(function ($) {
     var errorModalClose = $('.lp-modal-alert .modal-close.error-modal-close');
     var totalItemsMigrateCounts = $('#total_items_migrate_counts').data('count');
     var tutorMigrationUploadArea = $('.tutor-migration-upload-area');
+    var migrationConsentCheckbox = $('.migration-consent-checkbox');
 
     function activeModal(activeItem) {
         $(activeItem).addClass('active');
@@ -222,17 +594,55 @@ jQuery(document).ready(function ($) {
         removeItem.removeClass('active');
     }
 
+    function hasMigrationConsentRequirement() {
+        return migrationConsentCheckbox.length > 0;
+    }
+
+    function isMigrationConsentGiven() {
+        if (!hasMigrationConsentRequirement()) {
+            return true;
+        }
+        return migrationConsentCheckbox.is(':checked');
+    }
+
+    function setMigrationStartEnabled(enabled) {
+        if (!migrateStartBtn.length) {
+            return;
+        }
+        migrateStartBtn.toggleClass('is-disabled', !enabled);
+        migrateStartBtn.attr('aria-disabled', enabled ? 'false' : 'true');
+    }
+
+    function resetMigrationConsent() {
+        if (!hasMigrationConsentRequirement()) {
+            setMigrationStartEnabled(true);
+            return;
+        }
+        migrationConsentCheckbox.prop('checked', false);
+        setMigrationStartEnabled(false);
+    }
+
+    resetMigrationConsent();
+
     // migrate now button click
     $(migrateBtn).on('click', function (event) {
         event.preventDefault();
         if (totalItemsMigrateCounts > 0) {
+            resetMigrationConsent();
             migrationModal.addClass('active');
         }
+    });
+
+    $(document).on('change', '.migration-consent-checkbox', function () {
+        setMigrationStartEnabled($(this).is(':checked'));
     });
 
     // migrate now button click
     $(migrateStartBtn).on('click', function (event) {
         event.preventDefault();
+        if (!isMigrationConsentGiven()) {
+            return;
+        }
         if (totalItemsMigrateCounts > 0) {
             migrationModal.removeClass('active');
             $('#tlmt-lp-migrate-to-tutor-lms').submit();
@@ -242,6 +652,7 @@ jQuery(document).ready(function ($) {
     // migration later button click action
     $(migrateLaterBtn).on('click', function (event) {
         event.preventDefault();
+        resetMigrationConsent();
         removeModal(migrationModal);
     });
 
@@ -260,6 +671,7 @@ jQuery(document).ready(function ($) {
     // error modal close button click action
     $(migrateModalClose).on('click', function (event) {
         event.preventDefault();
+        resetMigrationConsent();
         removeModal(migrationModal);
     });
     // error modal close button click action
@@ -304,7 +716,7 @@ jQuery(document).ready(function ($) {
         let button = $(this);
         let form = button.closest('form#tutor_migration_export_form');
 
-        $.post(ajaxurl, {
+        postWithTutorNonce({
             migration_type: 'Exported',
             migration_vendor: form.children("#tutor_migration_vendor").val(),
             action: 'insert_tutor_migration_data'
@@ -340,7 +752,7 @@ jQuery(document).ready(function ($) {
             success: function (res) {
                 if (res.success) {
                     $('.lp-success-modal').addClass('active');
-                    $.post(ajaxurl, {
+                    postWithTutorNonce({
                         migration_type: 'Imported',
                         migration_vendor: $('#tutor_migration_vendor').val(),
                         action: 'insert_tutor_migration_data'

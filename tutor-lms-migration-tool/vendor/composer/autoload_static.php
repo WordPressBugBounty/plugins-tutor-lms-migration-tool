@@ -11,14 +11,14 @@ class ComposerStaticInit09c0214ba4d20330f4d354abee45cc43
     );
 
     public static $prefixLengthsPsr4 = array (
-        'T' => 
+        'T' =>
         array (
             'Themeum\\TutorLMSMigrationTool\\' => 30,
         ),
     );
 
     public static $prefixDirsPsr4 = array (
-        'Themeum\\TutorLMSMigrationTool\\' => 
+        'Themeum\\TutorLMSMigrationTool\\' =>
         array (
             0 => __DIR__ . '/../..' . '/inc',
         ),
@@ -49,6 +49,7 @@ class ComposerStaticInit09c0214ba4d20330f4d354abee45cc43
         'Themeum\\TutorLMSMigrationTool\\Interfaces\\Product' => __DIR__ . '/../..' . '/inc/Interfaces/Product.php',
         'Themeum\\TutorLMSMigrationTool\\Interfaces\\Review' => __DIR__ . '/../..' . '/inc/Interfaces/Review.php',
         'Themeum\\TutorLMSMigrationTool\\Interfaces\\StudentProgress' => __DIR__ . '/../..' . '/inc/Interfaces/StudentProgress.php',
+        'Themeum\\TutorLMSMigrationTool\\LDMigration\\CourseTaxonomies' => __DIR__ . '/../..' . '/inc/LDMigration/CourseTaxonomies.php',
         'Themeum\\TutorLMSMigrationTool\\LDMigration\\Order\\EDDOrder' => __DIR__ . '/../..' . '/inc/LDMigration/Order/EDDOrder.php',
         'Themeum\\TutorLMSMigrationTool\\LDMigration\\Order\\TutorOrder' => __DIR__ . '/../..' . '/inc/LDMigration/Order/TutorOrder.php',
         'Themeum\\TutorLMSMigrationTool\\LDMigration\\Order\\WCOrder' => __DIR__ . '/../..' . '/inc/LDMigration/Order/WCOrder.php',
@@ -62,6 +63,19 @@ class ComposerStaticInit09c0214ba4d20330f4d354abee45cc43
         'Themeum\\TutorLMSMigrationTool\\LDMigration\\Product\\WCProduct' => __DIR__ . '/../..' . '/inc/LDMigration/Product/WCProduct.php',
         'Themeum\\TutorLMSMigrationTool\\LDMigration\\Reviews' => __DIR__ . '/../..' . '/inc/LDMigration/Reviews.php',
         'Themeum\\TutorLMSMigrationTool\\LDMigration\\StudentProgress' => __DIR__ . '/../..' . '/inc/LDMigration/StudentProgress.php',
+        'Themeum\\TutorLMSMigrationTool\\LDMigration\\Subscriptions\\Helper' => __DIR__ . '/../..' . '/inc/LDMigration/Subscriptions/Helper.php',
+        'Themeum\\TutorLMSMigrationTool\\LDMigration\\Subscriptions\\Subscriptions' => __DIR__ . '/../..' . '/inc/LDMigration/Subscriptions/Subscriptions.php',
+        'Themeum\\TutorLMSMigrationTool\\LDMigration\\Subscriptions\\Transformers\\EnrollmentDataTransformer' => __DIR__ . '/../..' . '/inc/LDMigration/Subscriptions/Transformers/EnrollmentDataTransformer.php',
+        'Themeum\\TutorLMSMigrationTool\\LDMigration\\Subscriptions\\Transformers\\OrderDataTransformer' => __DIR__ . '/../..' . '/inc/LDMigration/Subscriptions/Transformers/OrderDataTransformer.php',
+        'Themeum\\TutorLMSMigrationTool\\LDMigration\\Subscriptions\\Transformers\\PlanDataTransformer' => __DIR__ . '/../..' . '/inc/LDMigration/Subscriptions/Transformers/PlanDataTransformer.php',
+        'Themeum\\TutorLMSMigrationTool\\LDMigration\\Subscriptions\\Transformers\\SubscriptionDataTransformer' => __DIR__ . '/../..' . '/inc/LDMigration/Subscriptions/Transformers/SubscriptionDataTransformer.php',
+        'Themeum\\TutorLMSMigrationTool\\LPMigration\\CourseTaxonomies' => __DIR__ . '/../..' . '/inc/LPMigration/CourseTaxonomies.php',
+        'Themeum\\TutorLMSMigrationTool\\LPMigration\\Enrollments' => __DIR__ . '/../..' . '/inc/LPMigration/Enrollments.php',
+        'Themeum\\TutorLMSMigrationTool\\LPMigration\\Orders\\OrderMigrator' => __DIR__ . '/../..' . '/inc/LPMigration/Orders/OrderMigrator.php',
+        'Themeum\\TutorLMSMigrationTool\\LPMigration\\Orders\\PaymentMethodMapper' => __DIR__ . '/../..' . '/inc/LPMigration/Orders/PaymentMethodMapper.php',
+        'Themeum\\TutorLMSMigrationTool\\LPMigration\\Orders\\StatusMapper' => __DIR__ . '/../..' . '/inc/LPMigration/Orders/StatusMapper.php',
+        'Themeum\\TutorLMSMigrationTool\\LPMigration\\Quizzes\\FillInBlanksTransformer' => __DIR__ . '/../..' . '/inc/LPMigration/Quizzes/FillInBlanksTransformer.php',
+        'Themeum\\TutorLMSMigrationTool\\LPMigration\\StudentProgress' => __DIR__ . '/../..' . '/inc/LPMigration/StudentProgress.php',
         'Themeum\\TutorLMSMigrationTool\\MigrationLogger' => __DIR__ . '/../..' . '/inc/MigrationLogger.php',
         'Themeum\\TutorLMSMigrationTool\\MigrationMapper' => __DIR__ . '/../..' . '/inc/MigrationMapper.php',
         'Themeum\\TutorLMSMigrationTool\\MigrationTypes' => __DIR__ . '/../..' . '/inc/MigrationTypes.php',
